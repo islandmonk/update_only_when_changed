@@ -292,7 +292,7 @@ FROM (
 	AND c.is_computed = 0
 
 	-- PK columns should not be included in the compound predicate. They wouldn't hurt
-	-- anything. Leave them out none-the-less. Adding them contributes nothing
+	-- anything. Leave them out nonetheless. Adding them contributes nothing
 	-- while making the compound predicate marginally more expensive.
 	AND NOT EXISTS (
 		SELECT 1 as is_part_of_pk
