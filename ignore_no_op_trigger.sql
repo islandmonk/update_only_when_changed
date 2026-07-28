@@ -2,10 +2,6 @@
 	Hi, I'm Doug Hills
 	Doug@HillsBrother.com
 
-	I've been working with databases for twenty five years or so. Over the years, I've crafted a few tricks that help with
-	application performance, schema modeling, naming, code generation, whatever. I'd like to share these tricks with whoever 
-	might find them beneficial. I wouldn't mind feedback / suggestions either. 
-
 	This script produces a script. The resulting machine-generated script can be executed to modify the table of your choice 
 	turning it into an UPDATE-ONLY-IF-CHANGED table. Obviously, the script could be modified to affect an array of tables all 
 	at once. I don't really recommend that.
@@ -188,12 +184,29 @@ GO
 --------------'
 
 SELECT @is_changed_predicate +=
-	@cr + @tab + CASE rn WHEN 1 THEN 'WHERE ' ELSE 'OR ' END + 'i.[' + [column_name] + '] IS DISTINCT FROM d.[' + [column_name] + '] '
+	  @cr + @tab 
+	+ CASE rn 
+		WHEN 1 THEN 'WHERE ' 
+		ELSE 'OR ' 
+	  END 
+	+ 'i.[' + [column_name] + '] ' 
+	+ col8
+	+ CASE 
+		WHEN LEN(col8) > 0 THEN @cr + @tab + @tab
+		ELSE ''
+	  END
+	+ 'IS DISTINCT FROM d.[' + [column_name] + '] '
+	+ col8
 	-- columns should only be added to the predicate if they are non-trivial and non-derived.
 	-- Adding a calculated column to this predicate calc would be a mistake.
 FROM (
 	SELECT 
 		  c.[name] as [column_name]
+		, CASE c.collation_name
+			WHEN 'SQL_Latin1_General_CP1_CI_AS'
+			THEN 'COLLATE SQL_Latin1_General_CP1_CS_AS '
+			ELSE ''
+		  END as col8
 		, ROW_NUMBER() OVER (ORDER BY c.[column_id]) as rn
 	FROM sys.schemas as s
 	INNER JOIN sys.tables as t
@@ -314,96 +327,4 @@ SELECT @cmd = REPLACE(@cmd, '{{match_predicate}}'		, @match_predicate)
 --print @join_predicate
 --print @join_predicate_d
 PRINT @cmd
-
--------------------------------------------------------------------------------------------
--- THIS is the END of the script that you run. Don't have any of the text below selected
--- when you execute this script. What follows is a hypothetical scenario where this
--- could be used.
-
-/*
--- setting the top @table_name parameter to '[dbo].[note]' and running the above script will 
--- produce a script that will create an INSTEAD OF trigger your table in the way described. Here is a
--- sample of the result of running this script against a table with this design:
---
-	CREATE TABLE [dbo].[note] (
-		  [note_id] [int] IDENTITY(1,1) NOT NULL PRIMARY KEY 
-		, [object_id] [int] NULL 
-		, [column_id] [int] NULL 
-		, [parent_note_id] [int] NULL 
-		, [note] [nvarchar](max) NULL 
-		, [created] [datetime] NOT NULL default(getdate())
-	)  
-
-*/
-
-GO
-
---------
--- INSTEAD OF UPDATE trigger for [dbo].[note]
-CREATE OR ALTER TRIGGER dbo_note__instead_of_IUD ON [dbo].[note]
-INSTEAD OF UPDATE, INSERT, DELETE 
-AS
-	/*
-	-- Doug@HillsBrother.com
-
-	This is the definition of an INSTEAD OF trigger. Its initial purpose is to reduce churn on tables
-	mostly for the sake of performance. There is nothing stopping you from altering this trigger to
-	add other functionality. Important Note: you are allowed AFTER UPDATE triggers on the same
-	table as one with an INSTEAD OF UPDATE trigger. AFTER UPDATE business logic is still available 
-	to you even if you go with this approach.
-	*/
-
-	UPDATE d
-	SET	
-		  [object_id] = i.[object_id]
-		, [column_id] = i.[column_id]
-		, [parent_note_id] = i.[parent_note_id]
-		, [note] = i.[note]
-	FROM [dbo].[note] as d -- deleted
-	INNER JOIN inserted as i 
-		ON d.[note_id] = i.[note_id] 
-	-- rows having no distinction between inserted and deleted are ignored
-	
-	WHERE i.[object_id] IS DISTINCT FROM d.[object_id] 
-	OR i.[column_id] IS DISTINCT FROM d.[column_id] 
-	OR i.[parent_note_id] IS DISTINCT FROM d.[parent_note_id] 
-	OR i.[note] IS DISTINCT FROM d.[note] 
-	OR i.[created] IS DISTINCT FROM d.[created]  
-
-	-- Inserts proceed as usual
-
-	INSERT [dbo].[note] (
- 		  [object_id]
-		, [column_id]
-		, [parent_note_id]
-		, [note]
-		, [created]
-	)
-	SELECT 
- 		  [object_id]
-		, [column_id]
-		, [parent_note_id]
-		, [note]
-		, [created]
-	FROM inserted as i
-	WHERE NOT EXISTS (
-		SELECT 1
-		FROM deleted as d
-		WHERE d.[note_id] = i.[note_id] 	
-	)
-
-	-- Deletes proceed  as usual
-
-	DELETE t 
-	FROM [dbo].[note] as t -- target 
-	INNER JOIN deleted as d
-		ON d.[note_id] = t.[note_id] 
-	WHERE NOT EXISTS (
-		SELECT 1
-		FROM inserted as i
-		WHERE d.[note_id] = i.[note_id] 	
-	)
-GO
---------------
-
 
